@@ -1,0 +1,270 @@
+<?php
+
+function banks_block_info()
+{
+    $blocks['banks'] = array(
+        'info'  => t('Banks'),
+        'cache' => DRUPAL_CACHE_PER_ROLE,
+    );
+
+    return $blocks;
+}
+
+function banks_menu()
+{
+    $items = array();
+
+    $items['admin/banks'] = array(
+        'title'            => 'Banks',
+        'page callback'    => 'banks_list',
+        'access arguments' => array('administer site configuration'),
+    );
+
+    $items['admin/banks/add'] = array(
+        'title'            => 'Add new item bank',
+        'page callback'    => 'drupal_get_form',
+        'page arguments'   => array('banks_form'),
+        'access arguments' => array('administer site configuration'),
+    );
+
+    $items['admin/banks/edit/%'] = array(
+        'title'            => 'Edit item bank',
+        'page callback'    => 'drupal_get_form',
+        'page arguments'   => array('banks_form', 3),
+        'access arguments' => array('administer site configuration'),
+    );
+
+    $items['admin/banks/remove/%'] = array(
+        'title'            => 'Remove item bank',
+        'page callback'    => 'banks_delete_item',
+        'page arguments'   => array(3),
+        'access arguments' => array('administer site configuration'),
+    );
+
+    ###
+
+    $items['admin/banks/test'] = array(
+        'page callback' => 'banks_testpage',
+        'access callback' => TRUE,
+        'type' => MENU_CALLBACK,
+    );
+
+    $items['admin/banks/%ctools_js'] = array(
+        'page callback' => 'banks_callback',
+        'page arguments' => array(1),
+        'access callback' => TRUE,
+        'type' => MENU_CALLBACK,
+    );
+
+    return $items;
+}
+
+function banks_list()
+{
+    $header = array(
+        array('data' => t('ID')),
+        array('data' => t('Name')),
+        array('data' => t('Action')),
+    );
+
+    $items = db_select('banks', 'b')
+        ->fields('b', array('id', 'name'))
+        ->execute()
+        ->fetchAll();
+
+    $rows = array();
+
+    if ($items) {
+        foreach ($items as $item) {
+            $actions = array(
+                l(t('edit'), 'admin/banks/edit/' . $item->id),
+                l(t('remove'), 'admin/banks/remove/' . $item->id),
+            );
+
+            $rows[] = array(
+                array('data' => $item->id),
+                array('data' => $item->name),
+                array('data' => implode(' | ', $actions)),
+            );
+        }
+    }
+
+    ctools_include('modal');
+    ctools_modal_add_js();
+
+    $output  = theme('table', array('header' => $header, 'rows' => $rows));
+    $output .= '<a href="?q=admin/banks/add" class="button ctools-use-modal" id="">'.t('Add more').'</a>';
+
+    return $output;
+}
+
+function bank_load($id)
+{
+    $bank = db_select('banks', 'b')
+        ->fields('b', array('id', 'name', 'bin_number', 'logo'))
+        ->condition('b.id', $id)
+        ->execute()
+        ->fetchAssoc();
+
+    return $bank;
+}
+
+function banks_delete_item($id)
+{
+    $delete_item = db_delete('banks')
+        ->condition('id', $id)
+        ->execute();
+
+    drupal_set_message('Remove success');
+}
+
+function banks_form($form, &$form_state, $bank=null)
+{
+    $form = array();
+
+    if ($bank) {
+        $bank = bank_load($bank);
+
+        if (!$bank) {
+            drupal_goto('admin/banks/add');
+        }
+    }
+
+    $form['name'] = array(
+        '#title'         => t('Name bank'),
+        '#type'          => 'textfield',
+        '#default_value' => $bank ? $bank['name'] : '',
+        '#required'      => True,
+    );
+
+    $form['bin_number'] = array(
+        '#title'         => t('Bin number bank'),
+        '#type'          => 'textfield',
+        '#default_value' => $bank ? $bank['bin_number'] : '',
+        '#required'      => True,
+    );
+
+    $form['logo'] = array(
+        '#type'              => 'managed_file',
+        '#title'             => t('Logo'),
+        '#upload_location'   => 'public://',
+        '#upload_validators' => array(
+            'file_validate_is_image'   => array(),
+            'file_validate_extensions' => array('png gif jpg jpeg'),
+            'file_validate_size'       => array(1 * 1024 * 1024),
+        ),
+        '#default_value'     => $bank ? $bank['logo'] : '',
+        '#required'          => True,
+    );
+
+    if ($bank) {
+        $form['id'] = array(
+            '#type'  => 'value',
+            '#value' => $bank['id'],
+        );
+
+        $form['old_logo'] = array(
+            '#type'  => 'value',
+            '#value' => $bank['logo'],
+        );
+    }
+
+    $form['submit'] = array(
+        '#type'  => 'submit',
+        '#value' => $bank ? t('Save') : t('Add'),
+    );
+
+    return $form;
+}
+
+function banks_form_validate($form, &$form_state)
+{
+    $values = $form_state['values'];
+
+    if (!is_numeric($values['bin_number'])) {
+        form_set_error('Bin number', t('Bin number is invalid!'));
+    }
+}
+
+function banks_form_submit($form, &$form_state)
+{
+    $values = $form_state['values'];
+
+    $bank = array(
+        'name'       => $values['name'],
+        'bin_number' => $values['bin_number'],
+        'logo'       => $values['logo'],
+    );
+
+    $logo = file_load($values['logo']);
+    $logo->status = FILE_STATUS_PERMANENT;
+    file_save($logo);
+    file_usage_add($logo, 'banks', 'banks', 0);
+
+    if (isset($values['id'])) {
+        if ($values['old_logo'] != $values['logo']) {
+            $old_file = file_load($values['old_logo']);
+            file_usage_delete($old_file, 'mymodule');
+            file_delete($old_file);
+        }
+
+        $bank['id'] = $values['id'];
+        drupal_write_record('banks', $bank, 'id');
+        drupal_set_message('Update success');
+    } else {
+        drupal_write_record('banks', $bank);
+        drupal_set_message('Add success');
+    }
+}
+
+###
+
+function banks_testpage()
+{
+    // Load the modal library and add the modal javascript.
+    ctools_include('modal');
+    ctools_modal_add_js();
+    return _banks_make_link('Magical modal');
+}
+
+function banks_callback($ajax)
+{
+    if ($ajax) {
+        ctools_include('ajax');
+        ctools_include('modal');
+
+        $form_state = array(
+            'ajax' => TRUE,
+            'title' => t('MyModule Modal Form'),
+        );
+
+        // Use ctools to generate ajax instructions for the browser to create
+        // a form in a modal popup.
+        $output = ctools_modal_form_wrapper('banks_form', $form_state);
+
+        // If the form has been submitted, there may be additional instructions
+        // such as dismissing the modal popup.
+        if (!empty($form_state['ajax_commands'])) {
+            $output = $form_state['ajax_commands'];
+        }
+
+        // Return the ajax instructions to the browser via ajax_render().
+        print ajax_render($output);
+        drupal_exit();
+    }
+    else {
+        return drupal_get_form('banks_form');
+    }
+}
+
+/**
+ * Helper function to make a link.
+ */
+function _banks_make_link($link_text = '') {
+    // Set a default value if no text in supplied.
+    if (empty($link_text)) {
+        $link_text = 'Magical Modal';
+    }
+
+    return '<div id="magical-modal-link">' . l($link_text, 'admin/banks/nojs', array('attributes' => array('class' => 'ctools-use-modal'))) . '</div>';
+}

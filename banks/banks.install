@@ -1,0 +1,23 @@
+<?php
+
+function banks_uninstall()
+{
+    cache_clear_all('banks', 'cache', True);
+    drupal_uninstall_schema('banks');
+    menu_rebuild();
+}
+
+function banks_schema()
+{
+    $schema['banks'] = array(
+        'fields' => array(
+            'id' => array('type' => 'serial', 'not null' => True),
+            'name' => array('type' => 'varchar', 'length' => 255, 'not null' => True),
+            'bin_number' => array('type' => 'int', 'not null' => True),
+            'logo' => array('type' => 'int', 'not null' => True)
+        ),
+        'primary key' => array('id'),
+    );
+
+    return $schema;
+}
